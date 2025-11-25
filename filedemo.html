@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Frame Extractor</title>
+<style>
+  body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  #gallery { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 20px; max-width: 90%; }
+  .frame { width: 100px; border: 1px solid #ccc; }
+  input, button { margin: 5px; }
+</style>
+</head>
+<body>
+
+<h1>Video Frame Extractor</h1>
+
+<input type="file" id="videoInput" accept="video/*">
+<label>Start time (seconds): <input type="number" id="startTime" value="0"></label>
+<label>Duration (seconds): <input type="number" id="duration" value="1"></label>
+<button id="extractBtn">Extract Frames</button>
+
+<div id="gallery"></div>
+
+<video id="videoPlayer" controls style="display:none;"></video>
+
+<script>
+const videoInput = document.getElementById("videoInput");
+const extractBtn = document.getElementById("extractBtn");
+const gallery = document.getElementById("gallery");
+const startTimeInput = document.getElementById("startTime");
+const durationInput = document.getElementById("duration");
+const videoPlayer = document.getElementById("videoPlayer");
+
+let videoFileURL = null;
+
+videoInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  videoFileURL = URL.createObjectURL(file);
+  videoPlayer.src = videoFileURL;
+});
+
+extractBtn.addEventListener("click", () => {
+  if (!videoFileURL) return alert("Select a video first!");
+  const startTime = parseFloat(startTimeInput.value);
+  const duration = parseFloat(durationInput.value);
+  const fps = 30; // 30 frames per second
+  const totalFrames = Math.floor(duration * fps);
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  const video = document.createElement("video");
+  video.src = videoFileURL;
+  video.crossOrigin = "anonymous";
+
+  video.addEventListener("loadedmetadata", () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    let frameIndex = 0;
+
+    function captureFrame() {
+      if (frameIndex >= totalFrames) return;
+      video.currentTime = startTime + frameIndex / fps;
+    }
+
+    video.addEventListener("seeked", () => {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = document.createElement("img");
+      img.src = canvas.toDataURL("image/png");
+      img.className = "frame";
+      gallery.appendChild(img);
+
+      frameIndex++;
+      captureFrame();
+    });
+
+    captureFrame();
+  });
+});
+</script>
+
+</body>
+</html>
