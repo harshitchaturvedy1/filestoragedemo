@@ -1,300 +1,137 @@
-Put your HTML text here<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Photo→1s Video demo — Frame-as-Photo</title>
-<style>
-  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding: 18px; background:#f6f8fb; color:#111; }
-  h1 { margin: 0 0 8px; font-size:20px; }
-  p { margin: 6px 0 14px; color:#333; }
-  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  .col { display:flex; flex-direction:column; gap:8px; }
-  #thumbs { display:flex; gap:6px; overflow:auto; padding:8px; border:1px dashed #ccc; background:white; max-width:100%; }
-  .thumb { width:60px; height:60px; object-fit:cover; cursor:pointer; border-radius:4px; border:2px solid transparent; }
-  .thumb:hover { border-color:#4f9cff; }
-  #videoPlayer { max-width:640px; border-radius:6px; background:black; }
-  #frameCanvas { border:1px solid #ccc; width:320px; height:180px; background:#000; }
-  label { font-size:13px; color:#444; }
-  button { background:#1572e8; color:white; padding:8px 12px; border:0; border-radius:6px; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  input[type=file] { padding:6px; }
-  #log { font-size:12px; color:#666; }
-  footer { margin-top:18px; font-size:12px; color:#666; }
-</style>
+  <meta charset="UTF-8">
+  <title>1-Second Video Maker - Storage Saver Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f1724;
+      color: #e6eef8;
+      padding: 20px;
+    }
+    .container {
+      max-width: 700px;
+      margin: auto;
+      background: #0b1320;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    input, button {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 16px;
+    }
+    button {
+      background: #60a5fa;
+      color: white;
+      cursor: pointer;
+    }
+    #previewFrame {
+      margin-top: 20px;
+      max-width: 100%;
+      border-radius: 8px;
+      display: none;
+    }
+  </style>
 </head>
+
 <body>
-  <h1>Photo → 1s Video Demo</h1>
-  <p>Upload 30 photos and this page will create a 1-second 30-FPS video (client-side). Click any thumbnail to "pull" that frame from the generated video.</p>
+<div class="container">
 
-  <div class="row">
-    <div class="col">
-      <label>Select up to 30 images (jpg/png):</label>
-      <input id="fileInput" type="file" accept="image/*" multiple>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button id="makeBtn" disabled>Create 1s Video (30 frames)</button>
-        <button id="downloadBtn" disabled>Download Video</button>
-      </div>
-      <div id="log"></div>
-    </div>
+<h2>📸 1-Second Video Generator (30 Photos → 30fps)</h2>
 
-    <div class="col">
-      <label>Thumbnails (click to capture frame from generated video):</label>
-      <div id="thumbs" aria-hidden="false"></div>
-    </div>
-  </div>
+<input type="file" id="imageInput" accept="image/*" multiple>
 
-  <hr style="margin:12px 0">
+<button onclick="generateVideo()">Generate 1-Second Video</button>
 
-  <div class="row">
-    <div class="col">
-      <label>Generated Video:</label>
-      <video id="videoPlayer" controls></video>
-      <div style="margin-top:8px;">
-        <label>Seek slider:</label>
-        <input id="seekSlider" type="range" min="0" max="1" step="0.001" value="0" style="width:100%; max-width:640px;">
-      </div>
-    </div>
+<p id="status"></p>
 
-    <div class="col">
-      <label>Captured Frame (from video):</label>
-      <canvas id="frameCanvas" width="640" height="360"></canvas>
-      <div style="margin-top:6px;">
-        <button id="captureBtn" disabled>Capture Current Video Frame</button>
-      </div>
-    </div>
-  </div>
+<h3>📊 File Size Comparison</h3>
+<p id="sizeComparison"></p>
 
-  <footer>Works fully in-browser. Best in Chrome/Firefox. Safari/iOS may have limitations with MediaRecorder WebM.</footer>
+<h3>🎞 Extracted Demo Frame</h3>
+<img id="previewFrame" />
+
+</div>
+
+<!-- FFmpeg.js -->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 
 <script>
-(async function(){
-  const fileInput = document.getElementById('fileInput');
-  const makeBtn = document.getElementById('makeBtn');
-  const downloadBtn = document.getElementById('downloadBtn');
-  const thumbs = document.getElementById('thumbs');
-  const log = document.getElementById('log');
-  const videoPlayer = document.getElementById('videoPlayer');
-  const frameCanvas = document.getElementById('frameCanvas');
-  const captureBtn = document.getElementById('captureBtn');
-  const seekSlider = document.getElementById('seekSlider');
-  const ctx = frameCanvas.getContext('2d');
+async function generateVideo() {
+  const files = document.getElementById('imageInput').files;
+  const status = document.getElementById("status");
 
-  let images = [];        // Array of Image objects (30)
-  let fps = 30;
-  let generatedBlob = null;
+  if (files.length !== 30) {
+    alert("Please upload exactly 30 photos.");
+    return;
+  }
 
-  function logMsg(txt){ log.textContent = txt; }
+  status.innerText = "Loading FFmpeg (first time takes a few seconds)...";
 
-  fileInput.addEventListener('change', async (e) => {
-    thumbs.innerHTML = '';
-    images = [];
-    generatedBlob = null;
-    videoPlayer.src = '';
-    downloadBtn.disabled = true;
-    captureBtn.disabled = true;
-    makeBtn.disabled = true;
-    const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
-    if(files.length === 0){ logMsg('No image files selected.'); return; }
-    logMsg('Loading images...');
-    // Load files into Image objects (preserve order)
-    for(const f of files.slice(0,30)){
-      const url = URL.createObjectURL(f);
-      const img = new Image();
-      img.src = url;
-      await new Promise((res,rej)=>{ img.onload = res; img.onerror = () => rej('load error'); });
-      images.push(img);
-    }
-    // If fewer than 30, repeat images to reach 30
-    if(images.length < 30){
-      const orig = images.slice();
-      let i = 0;
-      while(images.length < 30){
-        images.push(orig[i % orig.length]);
-        i++;
-      }
-    }
+  const { createFFmpeg, fetchFile } = FFmpeg;
+  const ffmpeg = createFFmpeg({ log: true });
+  await ffmpeg.load();
 
-    // Show thumbnails (these are the photos user uploaded)
-    images.forEach((img, i) => {
-      const t = document.createElement('img');
-      t.src = img.src;
-      t.className = 'thumb';
-      t.dataset.index = i;
-      t.title = `Frame ${i} (click to seek)`;
-      thumbs.appendChild(t);
-    });
+  status.innerText = "Processing images...";
 
-    makeBtn.disabled = false;
-    logMsg(`Loaded ${images.length} images (padded to 30 if needed). Click "Create 1s Video".`);
-  });
+  // calculate total input size
+  let totalImageSize = 0;
+  for (let f of files) totalImageSize += f.size;
 
-  // Create 1s video from 30 images using canvas.captureStream + MediaRecorder
-  makeBtn.addEventListener('click', async () => {
-    if(images.length < 1){ alert('Load images first'); return; }
-    makeBtn.disabled = true;
-    logMsg('Rendering video frames and recording (1 second)...');
+  // write images to memory
+  for (let i = 0; i < 30; i++) {
+    await ffmpeg.FS("writeFile", `img${String(i).padStart(2, '0')}.jpg`, await fetchFile(files[i]));
+  }
 
-    // Canvas used to draw frames at video resolution (choose size based on first image)
-    const width = images[0].naturalWidth || 640;
-    const height = images[0].naturalHeight || 360;
-    const renderCanvas = document.createElement('canvas');
-    renderCanvas.width = width;
-    renderCanvas.height = height;
-    const rctx = renderCanvas.getContext('2d');
+  status.innerText = "Generating 1-sec video...";
 
-    // Capture stream at desired fps
-    const stream = renderCanvas.captureStream(fps);
-    let options = {mimeType: 'video/webm;codecs=vp9'}; // best quality if supported
-    if(!MediaRecorder.isTypeSupported(options.mimeType)){
-      options = {mimeType: 'video/webm;codecs=vp8'};
-      if(!MediaRecorder.isTypeSupported(options.mimeType)) options = {mimeType: 'video/webm'};
-    }
-    const recorder = new MediaRecorder(stream, options);
-    const chunks = [];
-    recorder.ondataavailable = (e) => { if(e.data && e.data.size) chunks.push(e.data); };
+  // motion blur filter
+  const motionBlur = "minterpolate='fps=30:mi_mode=mci'";
 
-    recorder.start();
-    // Draw 30 frames at 30fps → 1 second total. Use precise timing.
-    const frameDuration = 1000 / fps; // ms
-    let frameIndex = 0;
-    const totalFrames = 30;
-    let lastTime = performance.now();
+  await ffmpeg.run(
+    '-framerate', '30',
+    '-i', 'img%02d.jpg',
+    '-vf', motionBlur,
+    '-t', '1',
+    '-pix_fmt', 'yuv420p',
+    'output.mp4'
+  );
 
-    function drawFrame(idx){
-      // Fit image to canvas while preserving aspect ratio (cover)
-      const img = images[idx];
-      const sw = img.naturalWidth, sh = img.naturalHeight;
-      const rw = renderCanvas.width, rh = renderCanvas.height;
-      // compute cover size
-      const scale = Math.max(rw/sw, rh/sh);
-      const dw = sw * scale, dh = sh * scale;
-      const dx = (rw - dw)/2, dy = (rh - dh)/2;
-      rctx.clearRect(0,0,rw,rh);
-      rctx.drawImage(img, dx, dy, dw, dh);
-    }
+  const data = ffmpeg.FS("readFile", "output.mp4");
 
-    // Step sequence using setInterval to ensure ~30fps
-    await new Promise((resolve) => {
-      drawFrame(0);
-      let timer = 0;
-      const id = setInterval(() => {
-        drawFrame(frameIndex);
-        frameIndex++;
-        timer++;
-        if(frameIndex >= totalFrames){
-          clearInterval(id);
-          // wait a tiny moment to ensure last frames encoded, then stop
-          setTimeout(() => {
-            recorder.stop();
-            resolve();
-          }, 50);
-        }
-      }, frameDuration);
-    });
+  // compare sizes
+  const videoSize = data.length;
+  document.getElementById("sizeComparison").innerHTML = `
+    📷 Total image size: <b>${(totalImageSize/1024/1024).toFixed(2)} MB</b><br>
+    🎬 Final video size: <b>${(videoSize/1024/1024).toFixed(2)} MB</b>
+  `;
 
-    // Wait until recorder stops and chunks collected
-    const blob = await new Promise((res) => {
-      recorder.onstop = () => {
-        const b = new Blob(chunks, {type: options.mimeType});
-        res(b);
-      };
-    });
+  // create video blob for download
+  const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+  const videoURL = URL.createObjectURL(videoBlob);
 
-    generatedBlob = blob;
-    const url = URL.createObjectURL(blob);
-    videoPlayer.src = url;
-    videoPlayer.load();
-    downloadBtn.disabled = false;
-    captureBtn.disabled = false;
-    logMsg('1-second video created. You can play it, download it, or capture frames from it.');
-    makeBtn.disabled = false;
-  });
+  status.innerHTML = `Video ready: <a href="${videoURL}" download="1sec.mp4">Download 1-second video</a>`;
 
-  // Download button
-  downloadBtn.addEventListener('click', () => {
-    if(!generatedBlob) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(generatedBlob);
-    a.download = 'photo_video_1s.webm';
-    a.click();
-  });
+  // extract demo frame
+  await ffmpeg.run(
+    '-i', 'output.mp4',
+    '-ss', '0.03',
+    '-vframes', '1',
+    'frame.jpg'
+  );
 
-  // Clicking thumbnails will seek the video to that frame time and capture it
-  thumbs.addEventListener('click', (e) => {
-    const t = e.target;
-    if(!t.classList.contains('thumb')) return;
-    const idx = Number(t.dataset.index || 0);
-    if(!generatedBlob){
-      // If video not generated yet, show original image in capture canvas
-      const img = images[idx];
-      // draw original high-res
-      const cw = frameCanvas.width, ch = frameCanvas.height;
-      ctx.clearRect(0,0,cw,ch);
-      // draw with cover fit
-      const scale = Math.max(cw/img.naturalWidth, ch/img.naturalHeight);
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-      const dx = (cw - dw)/2, dy = (ch - dh)/2;
-      ctx.drawImage(img, dx, dy, dw, dh);
-      return;
-    }
-    // Seek video to idx / fps seconds
-    const tSec = idx / fps;
-    videoPlayer.currentTime = Math.min(tSec, Math.max(0, videoPlayer.duration || 0));
-  });
+  const frameData = ffmpeg.FS("readFile", "frame.jpg");
+  const frameURL = URL.createObjectURL(new Blob([frameData.buffer], {type:"image/jpeg"}));
 
-  // Update seek slider as video plays
-  videoPlayer.addEventListener('timeupdate', () => {
-    if(!videoPlayer.duration) return;
-    const v = videoPlayer.currentTime / videoPlayer.duration;
-    seekSlider.value = v;
-  });
-
-  // Seek slider control (maps 0..1 to 0..duration)
-  seekSlider.addEventListener('input', () => {
-    if(!videoPlayer.duration) return;
-    const t = seekSlider.value * videoPlayer.duration;
-    videoPlayer.currentTime = t;
-  });
-
-  // Capture current video frame to canvas
-  captureBtn.addEventListener('click', () => {
-    if(!videoPlayer || !videoPlayer.readyState) return;
-    // draw current video frame to canvas at full resolution (scaled to canvas)
-    const cw = frameCanvas.width, ch = frameCanvas.height;
-    ctx.clearRect(0,0,cw,ch);
-    // We'll draw with cover fit for nicer look
-    const vw = videoPlayer.videoWidth, vh = videoPlayer.videoHeight;
-    if(vw && vh){
-      const scale = Math.max(cw/vw, ch/vh);
-      const dw = vw * scale, dh = vh * scale;
-      const dx = (cw - dw)/2, dy = (ch - dh)/2;
-      ctx.drawImage(videoPlayer, dx, dy, dw, dh);
-    } else {
-      // fallback: draw element scaled
-      ctx.drawImage(videoPlayer, 0, 0, cw, ch);
-    }
-  });
-
-  // Also capture on 'seeked' automatically so clicking thumbnails shows immediate result
-  videoPlayer.addEventListener('seeked', () => {
-    if(!generatedBlob) return;
-    // draw the frame to canvas
-    captureBtn.disabled = false;
-    const cw = frameCanvas.width, ch = frameCanvas.height;
-    ctx.clearRect(0,0,cw,ch);
-    const vw = videoPlayer.videoWidth, vh = videoPlayer.videoHeight;
-    if(vw && vh){
-      const scale = Math.max(cw/vw, ch/vh);
-      const dw = vw * scale, dh = vh * scale;
-      const dx = (cw - dw)/2, dy = (ch - dh)/2;
-      ctx.drawImage(videoPlayer, dx, dy, dw, dh);
-    } else {
-      ctx.drawImage(videoPlayer, 0, 0, cw, ch);
-    }
-  });
-
-})();
+  const img = document.getElementById("previewFrame");
+  img.src = frameURL;
+  img.style.display = "block";
+}
 </script>
+
 </body>
 </html>
