@@ -1,39 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>1-Second Video Maker - Storage Saver Demo</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background: #0f1724;
       color: #e6eef8;
       padding: 20px;
+      margin: 0;
     }
     .container {
-      max-width: 700px;
-      margin: auto;
+      max-width: 600px;
+      margin: 40px auto;
       background: #0b1320;
+      border: 1px solid #1e293b;
       border-radius: 12px;
-      padding: 20px;
+      padding: 24px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
     }
-    input, button {
-      margin-top: 10px;
+    h2, h3 {
+      margin-top: 0;
+      color: #f8fafc;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    input[type="file"] {
+      background: #1e293b;
       padding: 10px;
+      border-radius: 6px;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      padding: 12px;
       border-radius: 6px;
       border: none;
       font-size: 16px;
-    }
-    button {
-      background: #60a5fa;
-      color: white;
+      font-weight: 600;
       cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    button:disabled {
+      background: #475569;
+      cursor: not-allowed;
+    }
+    #status {
+      font-weight: 500;
+      color: #93c5fd;
+      margin: 15px 0;
+    }
+    .stats-card {
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 15px;
+    }
+    .savings-highlight {
+      color: #4ade80;
+      font-weight: bold;
     }
     #previewFrame {
-      margin-top: 20px;
+      margin-top: 15px;
       max-width: 100%;
       border-radius: 8px;
       display: none;
+      border: 1px solid #334155;
+    }
+    a {
+      color: #60a5fa;
     }
   </style>
 </head>
@@ -41,95 +87,124 @@
 <body>
 <div class="container">
 
-<h2>📸 1-Second Video Generator (30 Photos → 30fps)</h2>
+  <h2>1-Second Video Generator (30 Photos to 30fps)</h2>
+  <p>Select exactly 30 images to bundle into a compressed 1-second video.</p>
 
-<input type="file" id="imageInput" accept="image/*" multiple>
+  <div class="input-group">
+    <input type="file" id="imageInput" accept="image/*" multiple>
+    <button id="generateBtn" onclick="generateVideo()">Generate 1-Second Video</button>
+  </div>
 
-<button onclick="generateVideo()">Generate 1-Second Video</button>
+  <p id="status"></p>
 
-<p id="status"></p>
+  <div class="stats-card">
+    <h3>File Size Comparison</h3>
+    <p id="sizeComparison">No video generated yet.</p>
+  </div>
 
-<h3>📊 File Size Comparison</h3>
-<p id="sizeComparison"></p>
-
-<h3>🎞 Extracted Demo Frame</h3>
-<img id="previewFrame" />
+  <h3>Extracted Demo Frame</h3>
+  <img id="previewFrame" alt="Extracted Preview Frame" />
 
 </div>
 
-<!-- FFmpeg.js -->
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 
 <script>
+let ffmpegInstance = null;
+
+async function getFFmpeg() {
+  if (!ffmpegInstance) {
+    const { createFFmpeg } = FFmpeg;
+    ffmpegInstance = createFFmpeg({ log: true });
+  }
+  if (!ffmpegInstance.isLoaded()) {
+    await ffmpegInstance.load();
+  }
+  return ffmpegInstance;
+}
+
 async function generateVideo() {
-  const files = document.getElementById('imageInput').files;
+  const fileInput = document.getElementById('imageInput');
+  const btn = document.getElementById('generateBtn');
   const status = document.getElementById("status");
+  const files = fileInput.files;
 
   if (files.length !== 30) {
     alert("Please upload exactly 30 photos.");
     return;
   }
 
-  status.innerText = "Loading FFmpeg (first time takes a few seconds)...";
+  btn.disabled = true;
+  status.innerText = "Loading processing engine...";
 
-  const { createFFmpeg, fetchFile } = FFmpeg;
-  const ffmpeg = createFFmpeg({ log: true });
-  await ffmpeg.load();
+  try {
+    const ffmpeg = await getFFmpeg();
+    const { fetchFile } = FFmpeg;
 
-  status.innerText = "Processing images...";
+    status.innerText = "Processing images...";
 
-  // calculate total input size
-  let totalImageSize = 0;
-  for (let f of files) totalImageSize += f.size;
+    let totalImageSize = 0;
+    for (let i = 0; i < 30; i++) {
+      totalImageSize += files[i].size;
+      await ffmpeg.FS("writeFile", `img${String(i).padStart(2, '0')}.jpg`, await fetchFile(files[i]));
+    }
 
-  // write images to memory
-  for (let i = 0; i < 30; i++) {
-    await ffmpeg.FS("writeFile", `img${String(i).padStart(2, '0')}.jpg`, await fetchFile(files[i]));
+    status.innerText = "Generating video...";
+
+    const motionBlur = "minterpolate='fps=30:mi_mode=mci'";
+
+    await ffmpeg.run(
+      '-framerate', '30',
+      '-i', 'img%02d.jpg',
+      '-vf', motionBlur,
+      '-t', '1',
+      '-pix_fmt', 'yuv420p',
+      'output.mp4'
+    );
+
+    const data = ffmpeg.FS("readFile", "output.mp4");
+    const videoSize = data.length;
+
+    const savedBytes = totalImageSize - videoSize;
+    const savingsPercent = ((savedBytes / totalImageSize) * 100).toFixed(1);
+
+    document.getElementById("sizeComparison").innerHTML = `
+      Original Image Total: <b>${(totalImageSize / 1024 / 1024).toFixed(2)} MB</b><br>
+      Compressed Video Size: <b>${(videoSize / 1024 / 1024).toFixed(2)} MB</b><br>
+      Storage Savings: <span class="savings-highlight">${savingsPercent}% saved</span>
+    `;
+
+    const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+    const videoURL = URL.createObjectURL(videoBlob);
+
+    status.innerHTML = `Video ready: <a href="${videoURL}" download="1sec.mp4">Download 1-second video</a>`;
+
+    await ffmpeg.run(
+      '-i', 'output.mp4',
+      '-ss', '0.03',
+      '-vframes', '1',
+      'frame.jpg'
+    );
+
+    const frameData = ffmpeg.FS("readFile", "frame.jpg");
+    const frameURL = URL.createObjectURL(new Blob([frameData.buffer], { type: "image/jpeg" }));
+
+    const img = document.getElementById("previewFrame");
+    img.src = frameURL;
+    img.style.display = "block";
+
+    for (let i = 0; i < 30; i++) {
+      try { ffmpeg.FS("unlink", `img${String(i).padStart(2, '0')}.jpg`); } catch(e) {}
+    }
+    try { ffmpeg.FS("unlink", "output.mp4"); } catch(e) {}
+    try { ffmpeg.FS("unlink", "frame.jpg"); } catch(e) {}
+
+  } catch (error) {
+    console.error(error);
+    status.innerText = "An error occurred during video processing.";
+  } finally {
+    btn.disabled = false;
   }
-
-  status.innerText = "Generating 1-sec video...";
-
-  // motion blur filter
-  const motionBlur = "minterpolate='fps=30:mi_mode=mci'";
-
-  await ffmpeg.run(
-    '-framerate', '30',
-    '-i', 'img%02d.jpg',
-    '-vf', motionBlur,
-    '-t', '1',
-    '-pix_fmt', 'yuv420p',
-    'output.mp4'
-  );
-
-  const data = ffmpeg.FS("readFile", "output.mp4");
-
-  // compare sizes
-  const videoSize = data.length;
-  document.getElementById("sizeComparison").innerHTML = `
-    📷 Total image size: <b>${(totalImageSize/1024/1024).toFixed(2)} MB</b><br>
-    🎬 Final video size: <b>${(videoSize/1024/1024).toFixed(2)} MB</b>
-  `;
-
-  // create video blob for download
-  const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
-  const videoURL = URL.createObjectURL(videoBlob);
-
-  status.innerHTML = `Video ready: <a href="${videoURL}" download="1sec.mp4">Download 1-second video</a>`;
-
-  // extract demo frame
-  await ffmpeg.run(
-    '-i', 'output.mp4',
-    '-ss', '0.03',
-    '-vframes', '1',
-    'frame.jpg'
-  );
-
-  const frameData = ffmpeg.FS("readFile", "frame.jpg");
-  const frameURL = URL.createObjectURL(new Blob([frameData.buffer], {type:"image/jpeg"}));
-
-  const img = document.getElementById("previewFrame");
-  img.src = frameURL;
-  img.style.display = "block";
 }
 </script>
 
